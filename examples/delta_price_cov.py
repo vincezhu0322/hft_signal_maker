@@ -7,14 +7,14 @@ from dataapi.trial.timeflag_3s import snapshot_3s, _one_stock_3s
 def calculate_delta_p_covariance(cxt, method='snap'):
     cov_dict = {'ds': [], 'code': [], 'minute': [], 'covariance': []}
     if method == 'trans':
-        trans = cxt.get_trans(with_minute_flag=True, exclude_auction=True, exclude_cancel=True)
+        trans = cxt.get_trans(time_flag_freq='1min', exclude_auction=False, exclude_cancel=True)
         stock_group = trans.groupby(['ds', 'code'])
         for stock, one_stock in stock_group:
             one_stock['preprice'] = one_stock.price.shift(1)
             one_stock['delta_p'] = one_stock.price - one_stock.preprice
             one_stock['pre_delta_p'] = one_stock.delta_p.shift(1)
             one_stock = one_stock.dropna()
-            minute_group = one_stock.groupby('minute_flag')
+            minute_group = one_stock.groupby('time_flag')
             for minute, one_minute in minute_group:
                 cov = one_minute.delta_p.cov(one_minute.pre_delta_p)
                 cov_dict['ds'].append(stock[0])
@@ -22,7 +22,7 @@ def calculate_delta_p_covariance(cxt, method='snap'):
                 cov_dict['minute'].append(minute)
                 cov_dict['covariance'].append(cov)
     elif method == 'snap':
-        snapshot = cxt.get_snap(with_minute_flag=True, exclude_auction=True,)
+        snapshot = cxt.get_snap(time_flag_freq='1min', exclude_auction=True, exclude_post_trading=True)
         snapshot = snapshot.to_pandas()
         snapshot3s = snapshot_3s(snapshot)
         snapshot3s['price'] = (snapshot3s.bid1 + snapshot3s.ask1) / 2
