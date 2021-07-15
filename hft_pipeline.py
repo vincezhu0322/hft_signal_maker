@@ -1,3 +1,5 @@
+import pymysql
+pymysql.install_as_MySQLdb()
 from team_api import date_util as du
 from team_api.data.data_getter import api
 from dataapi.stock.cudf_market import get_cudf_transaction, get_cudf_snapshot, get_cudf_order_sh, get_cudf_order_sz
@@ -29,8 +31,12 @@ class HftContext:
             self.trans_data = self.trans_data[self.trans_data['transType'] != 0]
         return self.trans_data
 
-    def get_snap(self):
-        pass
+    def get_snap(self, with_minute_flag=False, exclude_auction=False,):
+        if with_minute_flag:
+            self.snap_data['minute_flag'] = self.snap_data['time'].map(lambda x: (x - 1) // 100000 + 1)
+        if exclude_auction:
+            self.snap_data = self.snap_data[self.snap_data['time'] >= 93000000]
+        return self.snap_data
 
     def get_order(self):
         pass

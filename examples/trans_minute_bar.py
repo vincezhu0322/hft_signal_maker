@@ -1,5 +1,5 @@
 import cudf
-from hft_signal_maker.hft_pipeline import HftPipeline
+from hft_pipeline import HftPipeline
 
 
 def calculate_minute_bar(cxt):
@@ -26,7 +26,7 @@ pipeline.add_block_step(calculate_minute_bar)
 
 if __name__ == '__main__':
     # result = pipeline.compute(start_ds='20210608', end_ds='20210608', universe=['000001.SZ', '000637.SZ'])
-    result = pipeline.compute(start_ds='20200101', end_ds='20200110', universe='StockA', n_code_partition=8)
+    result = pipeline.compute(start_ds='20200101', end_ds='20200110', universe='StockA', n_code_partition=1)
     print(result)
 
 
