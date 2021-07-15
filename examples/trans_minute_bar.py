@@ -3,7 +3,7 @@ from hft_pipeline import HftPipeline
 
 
 def calculate_minute_bar(cxt):
-    trans = cxt.get_trans(with_minute_flag=True, exclude_auction=True, exclude_cancel=True)
+    trans = cxt.get_trans(time_flag_freq='1min', exclude_auction=True, exclude_cancel=True)
     trans['amount'] = trans['volume'] * trans['price']
     items = trans.groupby(['code', 'minute_flag']).agg({'price': ['max', 'min'], 'volume': ['sum'], 'amount': ['sum']})
     open = trans.sort_values(['time']).drop_duplicates(subset=['code', 'minute_flag'], keep='first').set_index(
@@ -20,13 +20,13 @@ def calculate_minute_bar(cxt):
     return res
 
 
-pipeline = HftPipeline(include_trans=True, include_snap=True)
+pipeline = HftPipeline(include_trans=True)
 pipeline.add_block_step(calculate_minute_bar)
 
 
 if __name__ == '__main__':
     # result = pipeline.compute(start_ds='20210608', end_ds='20210608', universe=['000001.SZ', '000637.SZ'])
-    result = pipeline.compute(start_ds='20200101', end_ds='20200110', universe='StockA', n_code_partition=1)
+    result = pipeline.compute(start_ds='20200101', end_ds='20200110', universe='StockA')
     print(result)
 
 
