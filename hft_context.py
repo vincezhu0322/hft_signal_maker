@@ -134,10 +134,10 @@ class HftContext:
     def get_data(self):
         """
         获取前序步骤中已经完成的计算结果，可在cross和block过程中使用
-        :return:
+
+        :return: cudf.DataFrame，前序过程中计算完成的数据
         """
-        import cudf
-        return cudf.DataFrame.from_arrow(self._frame_data)
+        return self._frame_data
 
     def _add_snapshot_blocks(self, snapshot_blocks):
         self.snap_data = snapshot_blocks
