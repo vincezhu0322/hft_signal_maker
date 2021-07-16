@@ -19,7 +19,7 @@ def calculate_snap_trans_price_ratio(cxt):
     return snapshot
 
 
-pipeline = HftPipeline(include_trans=True, include_snap=True)
+pipeline = HftPipeline('1min_snap_price_ratio', include_trans=True, include_snap=True)
 pipeline.add_block_step(calculate_snap_trans_price_ratio)
 
 

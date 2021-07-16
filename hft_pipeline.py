@@ -33,8 +33,9 @@ def _cdf_cut_to_host(cdf, n=8):
 
 class HftPipeline:
 
-    def __init__(self, include_trans=False, include_order=False, include_snap=False,
+    def __init__(self, name, include_trans=False, include_order=False, include_snap=False,
                  time_flag='1min'):
+        self.name = name
         self.include_trans = include_trans
         self.include_order = include_order
         self.include_snap = include_snap
@@ -95,15 +96,16 @@ class HftPipeline:
                     if context._frame_data is None:
                         context._frame_data = res_data
                     else:
-                        context._frame_data = cudf.concat([context._frame_data, res_data], axis=1).to_arrow()
+                        context._frame_data = cudf.concat([context._frame_data, res_data], axis=1)
                 elif func_type == 'cross':
                     context._update_step('cross')
                     func(context)
                 else:
                     raise NotImplementedError()
-            df_result.append(context._frame_data.to_arrow())
+            df_result.append(context._frame_data.reset_index().to_arrow())
             logbook.info(f'finish compute {ds}')
-        return cudf.concat([cudf.DataFrame.from_arrow(df) for df in df_result])[self._factors]
+        return cudf.concat([cudf.DataFrame.from_arrow(df) for df in df_result]).set_index(
+            ['ds', 'code', 'time_flag'])[self._factors]
 
     def add_block_step(self, func, **kwargs):
         """
@@ -118,6 +120,7 @@ class HftPipeline:
     def add_cross_step(self, func, **kwargs):
         """
         新增cross步骤，在cross步骤中可使用当日计算出的全部数据
+
         :param func: HftContext => cudf.DataFrame(index with (code, time_freq))
         :param kwargs:
         :return:
@@ -127,6 +130,7 @@ class HftPipeline:
     def gen_factors(self, factors):
         """
         定义最终需要输出的因子
+
         :param factors:
         :return:
         """
