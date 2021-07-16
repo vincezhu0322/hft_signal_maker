@@ -1,4 +1,5 @@
-from hft_signal_maker.hft_pipeline import HftPipeline, HftContext
+from hft_signal_maker.hft_pipeline import HftPipeline
+from hft_signal_maker.hft_context import HftContext
 
 
 def calculate_snap_basic_bar(cxt):
