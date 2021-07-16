@@ -17,7 +17,7 @@ def _numba_ts_align(ts: int, freq_second: int):
     if second > 60 - freq_second:
         minute, second = minute + 1, 0
     else:
-        second = (second - 1) // freq_second + 1
+        second = ((second - 1) // freq_second + 1) * freq_second
     if minute >= 60:
         hour, minute = hour + 1, 0
     return hour * 10000 + minute * 100 + second
@@ -60,36 +60,42 @@ def _cdf_cut_to_host(cdf, n=8):
 class HftContext:
 
     def __init__(self):
+        self._current_step = None
         self.ds = None
         self.trans_data = None
         self.order_data = None
         self.snap_data = None
-        self._frame_data = []
+        self._frame_data = None
         self._current_interval = (None, None)
         self.all_intervals = set()
 
-    def get_trans(self, dimension_fix=True, time_flag_freq='1min', exclude_auction=False, exclude_cancel=True):
+    def get_trans(self, dimension_fix=True, time_flag_freq='1min', only_trade_time=False, exclude_auction=False,
+                  exclude_cancel=True):
         """
         获取逐笔成交数据
 
         :param dimension_fix: 是否要修正价格数据量纲，默认True
         :param time_flag_freq: 数据中'time_flag'字段的采样频次，默认为1min，可选3s/10s/1min/10min/30min
+        :param only_trade_time: 是否只包含交易时间数据，默认为False
         :param exclude_auction: 是否剔除集合竞价阶段数据
         :param exclude_cancel: 是否剔除取消单
         :return: cudf.DataFrame
         """
         import cudf
-        assert self.trans_data is not None
+        assert self.trans_data is not None and self._current_step == 'block'
         res = cudf.DataFrame.from_arrow(self.trans_data[self._current_interval])
         step = _time_flag(time_flag_freq)
         res['time_flag'] = res['time'].map(lambda x: _numba_ts_align(x // 1000, step))
         if dimension_fix:
             res['price'] = res['price'] / 10000
+        if only_trade_time:
+            res = res[(res['time'] >= 93000000) & (res['time'] <= 113000000)
+                      | (res['time'] >= 130000000) & (res['time'] <= 150000000)]
         if exclude_auction:
             res = res[res['time'] >= 93000000]
         if exclude_cancel:
             res = res[res['transType'] != 0]
-        return res
+        return res.sort_values(['code', 'time'])
 
     def get_snap(self, dimension_fix=True, time_flag_freq='3s', only_trade_time=False, exclude_auction=False,
                  exclude_post_trading=False, fill_time_flag=True):
@@ -105,7 +111,7 @@ class HftContext:
         :return:
         """
         import cudf
-        assert self.snap_data is not None
+        assert self.snap_data is not None and self._current_step == 'block'
         res = cudf.DataFrame.from_arrow(self.snap_data[self._current_interval])
         step = _time_flag(time_flag_freq)
         res['time_flag'] = res['time'].map(lambda x: _numba_ts_align(x // 1000, step))
@@ -179,7 +185,10 @@ class HftContext:
 
     def update_ds(self, ds):
         self.ds = ds
-        self._frame_data = []
+        self._frame_data = None
+
+    def get_data(self):
+        return cudf.DataFrame.from_arrow(self._frame_data)
 
     def _add_snapshot_blocks(self, snapshot_blocks):
         self.snap_data = snapshot_blocks
@@ -192,16 +201,24 @@ class HftContext:
     def _update_current_interval(self, interval):
         self._current_interval = interval
 
+    def update_step(self, step, interval=None):
+        self._current_step = step
+        self._current_interval = interval
+
 
 class HftPipeline:
 
     def __init__(self, include_trans=False, include_order=False, include_snap=False,
-                 minute_flag='1min'):
+                 time_flag='1min'):
         self.include_trans = include_trans
         self.include_order = include_order
         self.include_snap = include_snap
-        self.minute_flag = minute_flag
+        self.time_flag = time_flag
         self._steps = []
+        self._factors = []
+
+    def run(self, start_ds, end_ds, universe='StockA', n_blocks=1, **kwargs):
+        factor_data = self.compute(start_ds, end_ds, universe, n_blocks)
 
     def compute(self, start_ds, end_ds, universe='StockA', n_blocks=1):
         """
@@ -219,7 +236,7 @@ class HftPipeline:
         assert n_blocks in (1, 2, 4, 8), ValueError('n_blocks only support 1, 2, 4, 8')
         trading_days = du.get_between_date(start_ds, end_ds)
         context = HftContext()
-        result = []
+        df_result = []
         for ds in trading_days:
             logbook.info(f'start to compute {ds}')
             context.update_ds(ds=ds)
@@ -242,18 +259,26 @@ class HftPipeline:
             for step in self._steps:
                 func_type, func, kwargs = step
                 if func_type == 'block':
+                    res_data = []
                     for interval in context.all_intervals:
-                        context._update_current_interval(interval)
+                        context.update_step('block', interval=interval)
                         res = func(context)
                         res = res.reset_index()
                         res['ds'] = ds
-                        context._frame_data.append(res.set_index(['ds', 'code', 'time_flag']))
+                        res_data.append(res.set_index(['ds', 'code', 'time_flag']))
+                    res_data = cudf.concat(res_data).sort_index()
+                    if context._frame_data is None:
+                        context._frame_data = res_data
+                    else:
+                        context._frame_data = cudf.concat([context._frame_data, res_data], axis=1).to_arrow()
+                elif func_type == 'cross':
+                    context.update_step('cross')
+                    func(context)
                 else:
                     raise NotImplementedError()
-            ds_res = cudf.concat(context._frame_data).sort_index().to_pandas()
-            result.append(ds_res)
+            df_result.append(context._frame_data.to_arrow())
             logbook.info(f'finish compute {ds}')
-        return pd.concat(result)
+        return cudf.concat([cudf.DataFrame.from_arrow(df) for df in df_result])
 
     def add_block_step(self, func, **kwargs):
         """
@@ -267,6 +292,9 @@ class HftPipeline:
 
     def add_cross_step(self, func, **kwargs):
         self._steps.append(('cross', func, kwargs))
+
+    def gen_factors(self, factors):
+        self._factors = factors
 
 
 if __name__ == '__main__':
