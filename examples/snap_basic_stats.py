@@ -12,7 +12,7 @@ pipeline.add_block_step(calculate_snap_basic_bar)
 
 
 if __name__ == '__main__':
-    result = pipeline.compute(start_ds='20210608', end_ds='20210608', universe=['000001.SZ', '000637.SZ'])
-    # result = pipeline.compute(start_ds='20200101', end_ds='20200110', universe='StockA')
+    # result = pipeline.compute(start_ds='20210608', end_ds='20210608', universe=['000001.SZ', '000637.SZ'])
+    result = pipeline.compute(start_ds='20200102', end_ds='20200102', universe='StockA', n_blocks=8)
     print(result)
 

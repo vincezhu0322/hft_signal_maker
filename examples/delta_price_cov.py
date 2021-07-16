@@ -1,7 +1,6 @@
 import cudf
 import pandas as pd
-from hft_pipeline import HftPipeline
-from dataapi.trial.timeflag_3s import snapshot_3s, _one_stock_3s
+from hft_signal_maker.hft_pipeline import HftPipeline
 
 
 def calculate_delta_p_covariance(cxt, method='snap'):
@@ -22,9 +21,8 @@ def calculate_delta_p_covariance(cxt, method='snap'):
                 cov_dict['minute'].append(minute)
                 cov_dict['covariance'].append(cov)
     elif method == 'snap':
-        snapshot = cxt.get_snap(time_flag_freq='1min', exclude_auction=True, exclude_post_trading=True)
-        snapshot = snapshot.to_pandas()
-        snapshot3s = snapshot_3s(snapshot)
+        snapshot = cxt.get_snap(time_flag_freq='3s', exclude_auction=True, exclude_post_trading=True)
+        snapshot3s = snapshot.to_pandas()
         snapshot3s['price'] = (snapshot3s.bid1 + snapshot3s.ask1) / 2
         snapshot3s['preprice'] = snapshot3s.groupby(['ds', 'code']).price.shift(1)
         snapshot3s['delta_p'] = snapshot3s.price - snapshot3s.preprice
