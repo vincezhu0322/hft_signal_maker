@@ -1,4 +1,4 @@
-from hft_signal_maker.hft_pipeline import _time_flag, _numba_ts_align
+import numba
 
 
 class HftContext:
@@ -153,3 +153,27 @@ class HftContext:
     def _update_step(self, step, interval=None):
         self._current_step = step
         self._current_interval = interval
+
+
+def _time_flag(freq):
+    if freq.endswith('s'):
+        resample_second = int(freq.replace('second', '').replace('s', ''))
+    elif freq.endswith('min') or freq.endswith('m'):
+        resample_second = int(freq.replace('min', '').replace('m', '')) * 60
+    else:
+        resample_second = 3
+    return resample_second
+
+
+@numba.njit
+def _numba_ts_align(ts: int, freq_second: int):
+    second = ts % 100
+    minute = (ts // 100) % 100
+    hour = ts // 10000
+    if second > 60 - freq_second:
+        minute, second = minute + 1, 0
+    else:
+        second = ((second - 1) // freq_second + 1) * freq_second
+    if minute >= 60:
+        hour, minute = hour + 1, 0
+    return hour * 10000 + minute * 100 + second

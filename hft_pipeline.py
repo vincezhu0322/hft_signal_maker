@@ -3,33 +3,8 @@ from team_api import date_util as du
 from team_api.data.data_getter import api
 import logbook
 import pandas as pd
-import numba
 
 pd.options.display.max_columns = 20
-
-
-@numba.njit
-def _numba_ts_align(ts: int, freq_second: int):
-    second = ts % 100
-    minute = (ts // 100) % 100
-    hour = ts // 10000
-    if second > 60 - freq_second:
-        minute, second = minute + 1, 0
-    else:
-        second = ((second - 1) // freq_second + 1) * freq_second
-    if minute >= 60:
-        hour, minute = hour + 1, 0
-    return hour * 10000 + minute * 100 + second
-
-
-def _time_flag(freq):
-    if freq.endswith('s'):
-        resample_second = int(freq.replace('second', '').replace('s', ''))
-    elif freq.endswith('min') or freq.endswith('m'):
-        resample_second = int(freq.replace('min', '').replace('m', '')) * 60
-    else:
-        resample_second = 3
-    return resample_second
 
 
 def _cdf_cut_to_host(cdf, n=8):
