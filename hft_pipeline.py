@@ -3,6 +3,7 @@ from team_api.data.data_getter import api
 import logbook
 import pandas as pd
 import numba
+import cudf
 
 
 pd.options.display.max_columns = 20
@@ -131,12 +132,15 @@ class HftContext:
                 time = [int(f"{hour}{minute if minute >= 10 else f'0{minute}'}00") for hour in range(9, 16) for minute
                         in range(0, 60, int(step/60))]
             time = [t for t in time if 93000 <= t <= 150000]
-            code = [c for c in set(res.code.values) for i in range(len(time))]
-            time = time * len(set(res.code.values))
+            code = [c for c in res.code.unique().to_array() for i in range(len(time))]
+            time = time * len(res.code.unique().to_array())
             temp = cudf.DataFrame(time, code).reset_index()
             temp.columns = ['code', 'time_flag']
-            temp.merge(res, on=['code', 'time_flag'], how='left')
-            temp.fillna(method='ffill')
+            temp = temp.merge(res, on=['code', 'time_flag'], how='left').sort_values(['code', 'time_flag'])
+            temp[(temp.time_flag == 93000) | (temp.time_flag == 150000)] = temp[
+                (temp.time_flag == 93000) | (temp.time_flag == 150000)].fillna(0)
+            temp = temp.fillna(method='ffill')
+            res = temp
         return res
 
     def get_snap_tensor(self, dimension_fix=True, time_flag_freq='3s', only_trade_time=False, exclude_auction=False,
