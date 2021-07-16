@@ -17,7 +17,7 @@ def _numba_ts_align(ts: int, freq_second: int):
     if second > 60 - freq_second:
         minute, second = minute + 1, 0
     else:
-        second = (second - 1) // freq_second + 1
+        second = ((second - 1) // freq_second + 1) * freq_second
     if minute >= 60:
         hour, minute = hour + 1, 0
     return hour * 10000 + minute * 100 + second
