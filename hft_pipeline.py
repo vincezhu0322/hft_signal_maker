@@ -22,14 +22,14 @@ def _numba_ts_align(ts: int, freq_second: int):
     return hour * 10000 + minute * 100 + second
 
 
-def _time_flag(cdf_time, freq):
+def _time_flag(freq):
     if freq.endswith('s'):
         resample_second = int(freq.replace('second', '').replace('s', ''))
     elif freq.endswith('min') or freq.endswith('m'):
         resample_second = int(freq.replace('min', '').replace('m', '')) * 60
     else:
         resample_second = 3
-    return cdf_time.map(lambda x: _numba_ts_align(x // 1000, resample_second))
+    return resample_second
 
 
 class HftContext:
@@ -53,7 +53,8 @@ class HftContext:
         """
         assert self.trans_data is not None
         res = self.trans_data.copy()
-        res['time_flag'] = _time_flag(res['time'], time_flag_freq)
+        step = _time_flag(time_flag_freq)
+        res['time_flag'] = res['time'].map(lambda x: _numba_ts_align(x // 1000, step))
         if dimension_fix:
             res['price'] = res['price'] / 10000
         if exclude_auction:
@@ -63,10 +64,11 @@ class HftContext:
         return res
 
     def get_snap(self, dimension_fix=True, time_flag_freq='3s', only_trade_time=False, exclude_auction=False,
-                 exclude_post_trading=False):
+                 exclude_post_trading=False, fill_time_flag=True):
         """
         获取快照截面数据
 
+        :param fill_time_flag: 填充缺失的时间bar
         :param dimension_fix: 是否要修正价格数据量纲，默认True
         :param time_flag_freq: 数据中'time_flag'字段的采样频次，默认为1min，可选3s/10s/1min/10min/30min
         :param only_trade_time: 是否只包含交易时间数据，默认为False
@@ -76,7 +78,8 @@ class HftContext:
         """
         assert self.snap_data is not None
         res = self.snap_data.copy()
-        res['time_flag'] = _time_flag(res['time'], time_flag_freq)
+        step = _time_flag(time_flag_freq)
+        res['time_flag'] = res['time'].map(lambda x: _numba_ts_align(x // 1000, step))
         res = res.sort_values('time').drop_duplicates(subset=['code', 'time_flag'], keep='last')
         if dimension_fix:
             fix_fields = ['last', 'min', 'max', 'open', 'high', 'low']
@@ -92,6 +95,20 @@ class HftContext:
         if only_trade_time:
             res = res[(res['time'] >= 93000000) & (res['time'] <= 113000000)
                       | (res['time'] >= 130000000) & (res['time'] <= 150000000)]
+        if fill_time_flag:
+            if step < 60:
+                time = [int(f"{hour}{minute if minute >= 10 else f'0{minute}'}{second if second >= 10 else f'0{second}'}")
+                        for hour in range(9, 16) for minute in range(60) for second in range(0, 60, step)]
+            else:
+                time = [int(f"{hour}{minute if minute >= 10 else f'0{minute}'}00") for hour in range(9, 16) for minute
+                        in range(0, 60, int(step/60))]
+            time = [t for t in time if 93000 <= t <= 150000]
+            code = [c for c in set(res.code.values) for i in range(len(time))]
+            time = time * len(set(res.code.values))
+            temp = cudf.DataFrame(time, code).reset_index()
+            temp.columns = ['code', 'time_flag']
+            temp.merge(res, on=['code', 'time_flag'], how='left')
+            temp.fillna(method='ffill')
         return res
 
     def get_snap_tensor(self, dimension_fix=True, time_flag_freq='3s', only_trade_time=False, exclude_auction=False,
