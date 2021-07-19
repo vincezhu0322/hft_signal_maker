@@ -1,10 +1,10 @@
 import cudf
-from hft_pipeline import HftPipeline
+from hft_signal_maker.hft_pipeline import HftPipeline
 import numpy as np
-from cuml.linear_model import LinearRegression
 
 
 def calculate_bsflag_regression(cxt):
+    from cuml.linear_model import LinearRegression
     trans = cxt.get_trans(time_flag_freq='1min', exclude_auction=False, exclude_cancel=True)
     trans = trans.sort_values(['ds', 'code', 'time_flag']).reset_index(drop=True)
     trans['preprice'] = trans.groupby(['ds', 'code', 'time_flag']).price.shift(1).reset_index(drop=True)
@@ -32,6 +32,7 @@ def calculate_bsflag_regression(cxt):
 
 
 def calculate_bsflag_2diff_regression(cxt):
+    from cuml.linear_model import LinearRegression
     trans = cxt.get_trans(time_flag_freq='1min', exclude_auction=False, exclude_cancel=True)
     trans = trans.sort_values(['ds', 'code', 'time_flag']).reset_index(drop=True)
     trans['preprice'] = trans.groupby(['ds', 'code', 'time_flag']).price.shift(1).reset_index(drop=True)
@@ -62,5 +63,5 @@ def calculate_bsflag_2diff_regression(cxt):
     return L
 
 
-pipeline = HftPipeline(include_trans=True)
+pipeline = HftPipeline(name='1min_bsflag_regression', include_trans=True)
 pipeline.add_block_step(calculate_bsflag_regression)

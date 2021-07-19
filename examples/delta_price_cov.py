@@ -42,5 +42,5 @@ def calculate_delta_p_covariance(cxt, method='snap'):
     return delta_p_cov
 
 
-pipeline = HftPipeline(include_trans=True, include_snap=True)
+pipeline = HftPipeline(name='3s_delta_price_cov', include_trans=True, include_snap=True)
 pipeline.add_block_step(calculate_delta_p_covariance)

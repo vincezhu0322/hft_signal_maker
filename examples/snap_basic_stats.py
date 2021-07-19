@@ -1,4 +1,5 @@
-from hft_signal_maker.hft_pipeline import HftPipeline, HftContext
+from hft_signal_maker.hft_pipeline import HftPipeline
+from hft_signal_maker.hft_context import HftContext
 
 
 def calculate_snap_basic_bar(cxt):
@@ -7,7 +8,7 @@ def calculate_snap_basic_bar(cxt):
     return snap
 
 
-pipeline = HftPipeline(include_snap=True)
+pipeline = HftPipeline('1min_snap_basic_stats', include_snap=True)
 pipeline.add_block_step(calculate_snap_basic_bar)
 
 
