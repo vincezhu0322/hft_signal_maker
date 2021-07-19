@@ -124,8 +124,33 @@ class HftContext:
         tensor_result = cp.stack(tensor_result)
         return tensor_result, {'fields': columns, 'codes': codes, 'times': times}
 
-    def get_order(self):
-        pass
+    def get_order(self, dimension_fix=True, time_flag_freq='1min', only_trade_time=False, exclude_auction=False,
+                  exclude_cancel=True):
+        """
+        获取逐笔委托数据，只可在block运算中使用
+
+        :param dimension_fix: 是否要修正价格数据量纲，默认True
+        :param time_flag_freq: 数据中'time_flag'字段的采样频次，默认为1min，可选3s/10s/1min/10min/30min
+        :param only_trade_time: 是否只包含交易时间数据，默认为False
+        :param exclude_auction: 是否剔除集合竞价阶段数据
+        :param exclude_cancel: 是否剔除取消单
+        :return: cudf.DataFrame
+        """
+        import cudf
+        assert self.order_data is not None and self._current_step == 'block'
+        res = cudf.DataFrame.from_arrow(self.order_data[self._current_interval])
+        step = _time_flag(time_flag_freq)
+        res['time_flag'] = res['time'].map(lambda x: _numba_ts_align(x // 1000, step))
+        if dimension_fix:
+            res['price'] = res['price'] / 10000
+        if only_trade_time:
+            res = res[(res['time'] >= 93000000) & (res['time'] <= 113000000)
+                      | (res['time'] >= 130000000) & (res['time'] <= 150000000)]
+        if exclude_auction:
+            res = res[res['time'] >= 93000000]
+        if exclude_cancel:
+            res = res[res['ordertype'] != 4]
+        return res.sort_values(['code', 'time'])
 
     def _update_ds(self, ds):
         self.ds = ds
@@ -146,6 +171,10 @@ class HftContext:
     def _add_trans_blocks(self, trans_blocks):
         self.trans_data = trans_blocks
         self.all_intervals |= set(trans_blocks.keys())
+
+    def _add_order_blocks(self, order_blocks):
+        self.order_data = order_blocks
+        self.all_intervals |= set(order_blocks.keys())
 
     def _update_current_interval(self, interval):
         self._current_interval = interval

@@ -12,7 +12,7 @@ def _cdf_cut_to_host(cdf, n=8):
     res = {}
     if n == 8:
         time_slice_list = [(None, 100000), (100000, 103000), (103000, 110000), (110000, 113000), (130000, 133000),
-                      (133000, 140000), (140000, 143000), (143000, None)]
+                           (133000, 140000), (140000, 143000), (143000, None)]
     elif n == 4:
         time_slice_list = [(None, 103000), (103000, 113000), (130000, 140000), (140000, None)]
     elif n == 2:
@@ -45,7 +45,7 @@ class HftPipeline:
 
     def run(self, start_ds, end_ds, universe='StockA', n_blocks=1, **kwargs):
         factor_data = self.compute(start_ds, end_ds, universe, n_blocks)
-        #todo: 将计算完成的数据以h5的形式记录下来
+        # todo: 将计算完成的数据以h5的形式记录下来
 
     def compute(self, start_ds, end_ds, universe='StockA', n_blocks=1):
         """
@@ -57,7 +57,8 @@ class HftPipeline:
         :param n_blocks: 进行block计算时，数据切分的数量，切分数据后在计算时显存占用会显著减少
         :return: 计算出的最终结果，以cudf.DataFrame形式返回
         """
-        from dataapi.stock.cudf_market import get_cudf_transaction, get_cudf_snapshot
+        from dataapi.stock.cudf_market import get_cudf_transaction, get_cudf_snapshot, get_cudf_order_sh, \
+            get_cudf_order_sz
         import cudf
         assert n_blocks in (1, 2, 4, 8), ValueError('n_blocks only support 1, 2, 4, 8')
         trading_days = du.get_between_date(start_ds, end_ds)
@@ -81,7 +82,15 @@ class HftPipeline:
                     ds, code=code_list, source='rough_merge_v0', ns_time=False), n_blocks))
                 logbook.info(f'finish load trans')
             if self.include_order:
-                raise NotImplementedError()
+                logbook.info(f'start load order of {ds} and cut to {n_blocks} blocks')
+                order_sh = get_cudf_order_sh(ds, code=code_list, source='kuanrui', ).drop(
+                    columns=["orderindex", "channel", "bizindex"], inplace=True)
+                order_sh['exchange'] = 'sh'
+                order_sz = get_cudf_order_sh(ds, code=code_list, source='rough_merge_v0', )
+                order_sz['exchange'] = 'sz'
+                order = cudf.concat([order_sh, order_sz])
+                context._add_order_blocks(_cdf_cut_to_host(order, n_blocks))
+                logbook.info(f'finish load order')
             for step in self._steps:
                 func_type, func, kwargs = step
                 if func_type == 'block':
@@ -99,7 +108,11 @@ class HftPipeline:
                         context._frame_data = cudf.concat([context._frame_data, res_data], axis=1)
                 elif func_type == 'cross':
                     context._update_step('cross')
-                    func(context)
+                    res = func(context)
+                    res = res.reset_index()
+                    res['ds'] = ds
+                    res.append(res.set_index(['ds', 'code', 'time_flag']))
+                    context._frame_data = cudf.concat([context._frame_data, res], axis=1)
                 else:
                     raise NotImplementedError()
             df_result.append(context._frame_data.reset_index().to_arrow())
@@ -109,7 +122,7 @@ class HftPipeline:
 
     def add_block_step(self, func, **kwargs):
         """
-        新增block步骤，block步骤为定义在一组code及特定时间范围内的聚合运算
+        新增block步骤，block步骤为定义在特定时间范围内的聚合运算
 
         :param func: HftContext => cudf.DataFrame(index with (code, time_freq))。计算当前block对应的对齐数据
         :param kwargs:
@@ -139,5 +152,3 @@ class HftPipeline:
 
 if __name__ == '__main__':
     pass
-
-
