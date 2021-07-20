@@ -1,4 +1,4 @@
-import numba
+from hft_signal_maker.numba_util import _ts_align, get_cudf_from_arrow
 
 
 class HftContext:
@@ -25,11 +25,9 @@ class HftContext:
         :param exclude_cancel: 是否剔除取消单
         :return: cudf.DataFrame
         """
-        import cudf
         assert self.trans_data is not None and self._current_step == 'block'
-        res = cudf.DataFrame.from_arrow(self.trans_data[self._current_interval])
         step = _time_flag(time_flag_freq)
-        res['time_flag'] = res['time'].map(lambda x: _numba_ts_align(x // 1000, step))
+        res = get_cudf_from_arrow(self.trans_data[self._current_interval], step)
         if dimension_fix:
             res['price'] = res['price'] / 10000
         if only_trade_time:
@@ -58,7 +56,7 @@ class HftContext:
         assert self.snap_data is not None and self._current_step == 'block'
         res = cudf.DataFrame.from_arrow(self.snap_data[self._current_interval])
         step = _time_flag(time_flag_freq)
-        res['time_flag'] = res['time'].map(lambda x: _numba_ts_align(x // 1000, step))
+        res['time_flag'] = res['time'].map(lambda x: _ts_align(x // 1000, step))
         res = res.sort_values('time').drop_duplicates(subset=['code', 'time_flag'], keep='last')
         if dimension_fix:
             fix_fields = ['last', 'min', 'max', 'open', 'high', 'low']
@@ -140,7 +138,7 @@ class HftContext:
         assert self.order_data is not None and self._current_step == 'block'
         res = cudf.DataFrame.from_arrow(self.order_data[self._current_interval])
         step = _time_flag(time_flag_freq)
-        res['time_flag'] = res['time'].map(lambda x: _numba_ts_align(x // 1000, step))
+        res['time_flag'] = res['time'].map(lambda x: _ts_align(x // 1000, step))
         if dimension_fix:
             res['price'] = res['price'] / 10000
         if only_trade_time:
@@ -194,15 +192,3 @@ def _time_flag(freq):
     return resample_second
 
 
-@numba.njit
-def _numba_ts_align(ts: int, freq_second: int):
-    second = ts % 100
-    minute = (ts // 100) % 100
-    hour = ts // 10000
-    if second > 60 - freq_second:
-        minute, second = minute + 1, 0
-    else:
-        second = ((second - 1) // freq_second + 1) * freq_second
-    if minute >= 60:
-        hour, minute = hour + 1, 0
-    return hour * 10000 + minute * 100 + second
