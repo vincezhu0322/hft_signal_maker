@@ -9,6 +9,7 @@ class HftContext:
         self.trans_data = None
         self.order_data = None
         self.snap_data = None
+        self.trans_wiz_order_data = None
         self._frame_data = None
         self._current_interval = (None, None)
         self.all_intervals = set()
@@ -175,6 +176,10 @@ class HftContext:
     def _add_order_blocks(self, order_blocks):
         self.order_data = order_blocks
         self.all_intervals |= set(order_blocks.keys())
+
+    def _add_trans_wiz_order_blocks(self, trans_wiz_order_blocks):
+        self.trans_wiz_order_data = trans_wiz_order_blocks
+        self.all_intervals |= set(trans_wiz_order_blocks.keys())
 
     def _update_current_interval(self, interval):
         self._current_interval = interval
