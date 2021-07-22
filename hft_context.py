@@ -82,12 +82,13 @@ class HftContext:
             else:
                 time = [int(f"{hour}{minute if minute >= 10 else f'0{minute}'}00") for hour in range(9, 16) for minute
                         in range(0, 60, int(step/60))]
+            scale = (step//60)*100
             if self._current_interval[0] and self._current_interval[1]:
-                time = [t for t in time if self._current_interval[0] <= t <= self._current_interval[1]]
+                time = [t for t in time if self._current_interval[0]+scale <= t <= self._current_interval[1]+scale]
             elif self._current_interval[0]:
-                time = [t for t in time if self._current_interval[0] <= t <= 150000]
+                time = [t for t in time if self._current_interval[0]+scale <= t <= 150000]
             elif self._current_interval[1]:
-                time = [t for t in time if 93000 <= t <= self._current_interval[1]]
+                time = [t for t in time if 93000 <= t <= self._current_interval[1]+scale]
             else:
                 time = [t for t in time if 93000 <= t <= 150000]
             code = [c for c in res.code.unique().to_array() for i in range(len(time))]
