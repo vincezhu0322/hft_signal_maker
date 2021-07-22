@@ -82,7 +82,14 @@ class HftContext:
             else:
                 time = [int(f"{hour}{minute if minute >= 10 else f'0{minute}'}00") for hour in range(9, 16) for minute
                         in range(0, 60, int(step/60))]
-            time = [t for t in time if 93000 <= t <= 150000]
+            if self._current_interval[0] and self._current_interval[1]:
+                time = [t for t in time if self._current_interval[0] <= t <= self._current_interval[1]]
+            elif self._current_interval[0]:
+                time = [t for t in time if self._current_interval[0] <= t <= 150000]
+            elif self._current_interval[1]:
+                time = [t for t in time if 93000 <= t <= self._current_interval[1]]
+            else:
+                time = [t for t in time if 93000 <= t <= 150000]
             code = [c for c in res.code.unique().to_array() for i in range(len(time))]
             time = time * len(res.code.unique().to_array())
             temp = cudf.DataFrame(time, code).reset_index()
@@ -208,6 +215,12 @@ def _numba_ts_align(ts: int, freq_second: int):
         minute, second = minute + 1, 0
     else:
         second = ((second - 1) // freq_second + 1) * freq_second
-    if minute >= 60:
+    if freq_second > 60:
+        freq_minute = freq_second/60
+    else:
+        freq_minute = 1
+    if minute > 60 - freq_minute:
         hour, minute = hour + 1, 0
+    else:
+        minute = ((minute - 1) // freq_minute + 1) * freq_minute
     return hour * 10000 + minute * 100 + second

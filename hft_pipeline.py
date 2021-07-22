@@ -69,7 +69,6 @@ class HftPipeline:
                         in range(0, 60, int(freq / 60))]
             time = [t for t in time if (93000 <= t <= 113000) | (130000 <= t <= 150000)]
             time = cudf.DataFrame({'time_flag': time, 'anchor': 1})
-            code_list = list(data.code.unique().to_array())
             codes = cudf.DataFrame({'code': code_list, 'anchor': 1})
             ct = codes.merge(time, on=['anchor'], how='outer').drop(columns=['anchor']).sort_values(
                 ['code', 'time_flag']).reset_index(drop=True)
@@ -121,7 +120,7 @@ class HftPipeline:
                 for i in range(window):
                     temp_ds = str(int(ds) - i)
                     snap.append(get_cudf_snapshot(
-                        temp_ds, code=code_list, source='rough_merge_v2', ns_time=False))
+                        temp_ds, code=code_list, source='huatai', ns_time=False))
                 context._add_snapshot_blocks(_cdf_cut_to_host(cudf.concat(snap), n_blocks))
                 logbook.info(f'finish load snap')
             if self.include_trans:
