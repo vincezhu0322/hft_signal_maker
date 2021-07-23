@@ -166,6 +166,26 @@ class HftContext:
             res = res[res['ordertype'] != 4]
         return res.sort_values(['code', 'time'])
 
+    def get_trans_wiz_order(self, dimension_fix=True, time_flag_freq='1min', only_trade_time=False, exclude_auction=False,
+                  exclude_cancel=True):
+        import cudf
+        assert self.trans_wiz_order_data is not None and self._current_step == 'block'
+        res = cudf.DataFrame.from_arrow(self.trans_wiz_order_data[self._current_interval])
+        step = _time_flag(time_flag_freq)
+        res['time_flag'] = res['time'].map(lambda x: _ts_align(x // 1000, step))
+        if dimension_fix:
+            res['price'] = res['price'] / 10000
+            res['bid_price'] = res['bid_price'] / 10000
+            res['ask_price'] = res['ask_price'] / 10000
+        if only_trade_time:
+            res = res[(res['time'] >= 93000000) & (res['time'] <= 113000000)
+                      | (res['time'] >= 130000000) & (res['time'] <= 150000000)]
+        if exclude_auction:
+            res = res[res['time'] >= 93000000]
+        if exclude_cancel:
+            res = res[res['transType'] != 0]
+        return res.sort_values(['code', 'time'])
+
     def _update_ds(self, ds):
         self.ds = ds
         self._frame_data = None
