@@ -84,20 +84,25 @@ class HftContext:
                         in range(0, 60, int(step/60))]
             scale = (step//60)*100
             if self._current_interval[0] and self._current_interval[1]:
-                time = [t for t in time if self._current_interval[0]+scale <= t <= self._current_interval[1]+scale]
+                starttime = self._current_interval[0] + scale
+                endtime = self._current_interval[1] + scale
             elif self._current_interval[0]:
-                time = [t for t in time if self._current_interval[0]+scale <= t <= 150000]
+                starttime = self._current_interval[0] + scale
+                endtime = 150000
             elif self._current_interval[1]:
-                time = [t for t in time if 93000 <= t <= self._current_interval[1]+scale]
+                starttime = 93000
+                endtime = self._current_interval[1] + scale
             else:
-                time = [t for t in time if 93000 <= t <= 150000]
+                starttime = 93000
+                endtime = 150000
+            time = [t for t in time if starttime <= t <= endtime]
             code = [c for c in res.code.unique().to_array() for i in range(len(time))]
             time = time * len(res.code.unique().to_array())
             temp = cudf.DataFrame(time, code).reset_index()
             temp.columns = ['code', 'time_flag']
             temp = temp.merge(res, on=['code', 'time_flag'], how='left').sort_values(['code', 'time_flag'])
-            temp[(temp.time_flag == 93000) | (temp.time_flag == 150000)] = temp[
-                (temp.time_flag == 93000) | (temp.time_flag == 150000)].fillna(0)
+            temp[(temp.time_flag == starttime) | (temp.time_flag == endtime)] = temp[
+                (temp.time_flag == starttime) | (temp.time_flag == endtime)].fillna(0)
             temp = temp.fillna(method='ffill')
             res = temp
         return res
