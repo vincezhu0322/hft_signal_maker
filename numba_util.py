@@ -1,13 +1,8 @@
 import numba
 
 
-from numba.pycc import CC
-export_helper = CC("numba_tool")
-
-
-@export_helper.export("numba_ts_align", "i4(i4, i4)")
-@numba.njit()
-def numba_ts_align(ts: int, freq_second: int):
+@numba.jit(nopython=True)
+def _ts_align(ts: int, freq_second: int):
     second = ts % 100
     minute = (ts // 100) % 100
     hour = ts // 10000
@@ -20,5 +15,8 @@ def numba_ts_align(ts: int, freq_second: int):
     return hour * 10000 + minute * 100 + second
 
 
-if __name__ == '__main__':
-    export_helper.compile()
+def get_cudf_from_arrow(arrow_data, align_step):
+    import cudf
+    res = cudf.DataFrame.from_arrow(arrow_data)
+    res['time_flag'] = res['time'].map(lambda x: _ts_align(x // 1000, align_step))
+    return res
