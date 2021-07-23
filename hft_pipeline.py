@@ -53,7 +53,7 @@ class HftPipeline:
             date = '-'.join([ds[:4], ds[4:6], ds[6:]])
             code_list = list(data.code.unique().to_array())
             factor_list = self._factors
-            file_name = '/mnt/lustre/home/zwx/hft_signal_maker/factors/' + self.name + '.h5'
+            file_name = f'/mnt/lustre/home/zwx/hft_signal_maker/factors/{self.name}/{ds}.h5'
             time_series = [("09:30:00", "11:30:00"), ("13:00:00", "15:00:00")]
             freq = _time_flag(self.time_flag)
             writer = FactorH5Writer(file_name)
