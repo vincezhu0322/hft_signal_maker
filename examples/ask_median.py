@@ -4,7 +4,6 @@ from hft_signal_maker.hft_pipeline import HftPipeline
 
 def calculate_ask_median(cxt):
     snap = cxt.get_snap(time_flag_freq='5min', only_trade_time=True)
-    return snap
     snap['mid_price'] = (snap.bid1+snap.ask1)/2
     items = snap.groupby(['code', 'time_flag']).agg({'ask1': ['median'], 'bid1': ['median'], 'bid1vol': ['median'], 'ask1vol': ['median'], 'mid_price': ['median']})
     res = cudf.concat([items['bid1']['median'].rename('bid_median'),

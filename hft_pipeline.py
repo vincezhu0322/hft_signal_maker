@@ -50,15 +50,18 @@ class HftPipeline:
     def run(self, start_ds, end_ds, universe='StockA', n_blocks=1, **kwargs):
         factor_data = self.compute(start_ds, end_ds, universe, n_blocks).reset_index()
         for ds, data in factor_data.groupby('ds'):
-            date = ds
+            date = '-'.join([ds[:4], ds[4:6], ds[6:]])
             code_list = list(data.code.unique().to_array())
             factor_list = self._factors
-            file_name = './factors/'+self.name+'.h5'
+            file_name = '/mnt/lustre/home/zwx/hft_signal_maker/factors/' + self.name + '.h5'
             time_series = [("09:30:00", "11:30:00"), ("13:00:00", "15:00:00")]
             freq = _time_flag(self.time_flag)
-            writer = FactorH5Writer(file_name, code_list=code_list,
-                                    factor_list=factor_list, time_series=time_series, date=date, freq=freq, data_type="f")
+            writer = FactorH5Writer(file_name)
+            writer.init(code_list=code_list,
+                        factor_list=factor_list, time_series=time_series, date=date, freq=freq,
+                        data_type="f")
             import cupy as cp
+            import numpy as np
             import cudf
             if freq < 60:
                 time = [
@@ -85,9 +88,9 @@ class HftPipeline:
             for c in columns:
                 tensor_result.append(cp.asarray(data_unstack[c].as_gpu_matrix()))
             tensor_result = cp.stack(tensor_result)
-            writer.h5_file['data'][:, :, :] = tensor_result
+            tensor_result = tensor_result.swapaxes(2, 0)
+            writer.h5_file['data'][:, :, :] = np.array(tensor_result.astype('float32').get())
             writer.close()
-        # todo: 将计算完成的数据以h5的形式记录下来
 
     def compute(self, start_ds, end_ds, universe='StockA', n_blocks=1, window=1):
         """
