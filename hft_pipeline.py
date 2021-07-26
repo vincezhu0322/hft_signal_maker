@@ -33,6 +33,37 @@ def _cdf_cut_to_host(cdf, n=8):
     return res
 
 
+def _read_one_day(fname, ds, time_range=None, code_list=None, factor_list=None):
+    from datetime import datetime
+    file_name = f'/mnt/lustre/home/zwx/hft_signal_maker/factors/{fname}/{ds}.h5'
+    reader = FactorH5Reader(file_name)
+    if not code_list:
+        code_list = reader.code_list
+    if not factor_list:
+        factor_list = reader.factor_list
+    if not time_range:
+        unixtime_list = reader.unixtime_list
+    else:
+        starttime = time_range[0]
+        endtime = time_range[1]
+        start_h = int(starttime.split(':')[0])
+        start_m = int(starttime.split(':')[1])
+        start_s = int(starttime.split(':')[2])
+        start = datetime(int(ds[:4]), int(ds[4:6]), int(ds[6:8]), start_h, start_m, start_s).timestamp() * 1e6
+        end_h = int(endtime.split(':')[0])
+        end_m = int(endtime.split(':')[1])
+        end_s = int(endtime.split(':')[2])
+        end = datetime(int(ds[:4]), int(ds[4:6]), int(ds[6:8]), end_h, end_m, end_s).timestamp() * 1e6
+        unixtime_list = [t for t in reader.unixtime_list if t > start and t < end]
+    res = reader.read(time_list=unixtime_list, code_list=code_list, factor_list=factor_list, output_type="df")
+    metadata = reader.read_metadata()
+    res.reset_index(inplace=True)
+    res.insert(0, 'time', res.unixtime.apply(lambda x: str(datetime.fromtimestamp(x / 1e6))[-8:].replace(':', '')))
+    res['time'] = res.time.astype('int32')
+    res.insert(0, 'ds', ds)
+    return res
+
+
 class HftPipeline:
 
     def __init__(self, name, include_trans=False, include_order=False, include_snap=False,
@@ -48,21 +79,24 @@ class HftPipeline:
         self._factors = []
 
     def run(self, start_ds, end_ds, universe='StockA', n_blocks=1, **kwargs):
+        import os
+        import cupy as cp
+        import numpy as np
+        import cudf
         factor_data = self.compute(start_ds, end_ds, universe, n_blocks).reset_index()
         for ds, data in factor_data.groupby('ds'):
             date = '-'.join([ds[:4], ds[4:6], ds[6:]])
             code_list = list(data.code.unique().to_array())
             factor_list = self._factors
-            file_name = f'/mnt/lustre/home/zwx/hft_signal_maker/factors/{self.name}/{ds}.h5'
+            factor_path = f'/mnt/lustre/home/zwx/hft_signal_maker/factors/{self.name}'
             time_series = [("09:30:00", "11:30:00"), ("13:00:00", "15:00:00")]
             freq = _time_flag(self.time_flag)
+            os.makedirs(factor_path, exist_ok=True)
+            file_name = os.path.join(factor_path, f'{ds}.h5')
             writer = FactorH5Writer(file_name)
             writer.init(code_list=code_list,
                         factor_list=factor_list, time_series=time_series, date=date, freq=freq,
                         data_type="f")
-            import cupy as cp
-            import numpy as np
-            import cudf
             if freq < 60:
                 time = [
                     int(f"{hour}{minute if minute >= 10 else f'0{minute}'}{second if second >= 10 else f'0{second}'}")
@@ -225,6 +259,32 @@ class HftPipeline:
         :return:
         """
         self._factors = factors
+
+    def get(self, start_ds, end_ds, time_range: list = None, code_list: list = None, factor_list: list = None, n_jobs=None):
+        """
+        读取存储在h5中的因子值
+
+        :param start_ds: 开始日期
+        :param end_ds: 结束日期
+        :param time_range: 时间范围，例如['09:30:00', '10:00:00']
+        :param code_list: 股票列表，例如['000002', '601888']
+        :param factor_list: 因子列表，例如['open', 'close', 'high', 'low']
+        :param n_jobs: 进程数，默认None
+        :return: df
+        """
+        from tqdm import tqdm
+        trading_days = du.get_between_date(start_ds, end_ds)
+        if n_jobs:
+            from joblib import Parallel, delayed
+            df_list = Parallel(n_jobs=n_jobs, backend='multiprocessing')(
+                delayed(_read_one_day)(self.name, ds, time_range, code_list, factor_list)
+                for ds in tqdm(trading_days))
+        else:
+            df_list = []
+            for ds in tqdm(trading_days):
+                df_list.append(_read_one_day(self.name, ds, time_range, code_list, factor_list))
+        df = pd.concat(df_list)
+        return df
 
 
 if __name__ == '__main__':
