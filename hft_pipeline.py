@@ -1,6 +1,5 @@
 from hft_signal_maker.hft_context import HftContext
-from team_api import date_util as du
-from team_api.data.data_getter import api
+from tools import date_util as du
 import logbook
 import pandas as pd
 
@@ -70,7 +69,14 @@ class HftPipeline:
             if isinstance(universe, list):
                 code_list = universe
             else:
-                code_list = list(api.universe(ds, universe).reset_index()['code'].unique())
+                if universe in ('ALL', 'TOP2000', 'ALL_BASE_WITH_KECHUANG', 'ALL_BASE', 'QL1', 'SZ50', 'HS300', 'ZZ500', 'ZZ1000'):
+                    import dataapi
+                    code_list = list(dataapi.get_stock_universe(ds, ds, universe).reset_index()['code'].unique())
+                elif universe in ('all', 'tiny', 'tinybuffer', 'tinyall', 'broad800', 'broad800buffer', 'broad800all', 'exipo60', 'StockA'):
+                    from team_api.data.data_getter import api
+                    code_list = list(api.universe(ds, universe).reset_index()['code'].unique())
+                else:
+                    raise NotImplementedError(f'unknown universe {universe}')
             if self.include_snap:
                 logbook.info(f'start load snap of {ds} and cut to {n_blocks} blocks')
                 context._add_snapshot_blocks(_cdf_cut_to_host(get_cudf_snapshot(
