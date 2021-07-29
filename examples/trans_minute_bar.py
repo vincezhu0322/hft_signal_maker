@@ -20,14 +20,10 @@ def calculate_minute_bar(cxt):
     return res
 
 
-pipeline = HftPipeline('1min_trans_basic_bar', include_trans=True)
-pipeline.add_block_step(calculate_minute_bar)
-pipeline.gen_factors(['open', 'close', 'high', 'low', 'volume', 'amount', 'vwap'])
-
-
 if __name__ == '__main__':
+    pipeline = HftPipeline('1min_trans_basic_bar', include_trans=True)
+    pipeline.add_block_step(calculate_minute_bar, window=5)
+    pipeline.gen_factors(['open', 'close', 'high', 'low', 'volume', 'amount', 'vwap'])
     # result = pipeline.compute(start_ds='20210608', end_ds='20210608', universe=['000001.SZ', '000637.SZ'])
     result = pipeline.compute(start_ds='20200101', end_ds='20200104', universe='StockA', n_blocks=8)
     print(result)
-
-

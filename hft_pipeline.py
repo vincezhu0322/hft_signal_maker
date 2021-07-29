@@ -3,6 +3,8 @@ from tools import date_util as du
 import logbook
 import pandas as pd
 
+from iosdk.adapter.freefactors_h5 import FactorH5Writer, FactorH5Reader
+
 pd.options.display.max_columns = 20
 
 
@@ -30,26 +32,104 @@ def _cdf_cut_to_host(cdf, n=8):
     return res
 
 
+def _read_one_day(fname, ds, time_range=None, code_list=None, factor_list=None):
+    from datetime import datetime
+    file_name = f'/mnt/lustre/home/zwx/hft_signal_maker/factors/{fname}/{ds}.h5'
+    reader = FactorH5Reader(file_name)
+    if not code_list:
+        code_list = reader.code_list
+    if not factor_list:
+        factor_list = reader.factor_list
+    if not time_range:
+        unixtime_list = reader.unixtime_list
+    else:
+        starttime = time_range[0]
+        endtime = time_range[1]
+        start_h = int(starttime.split(':')[0])
+        start_m = int(starttime.split(':')[1])
+        start_s = int(starttime.split(':')[2])
+        start = datetime(int(ds[:4]), int(ds[4:6]), int(ds[6:8]), start_h, start_m, start_s).timestamp() * 1e6
+        end_h = int(endtime.split(':')[0])
+        end_m = int(endtime.split(':')[1])
+        end_s = int(endtime.split(':')[2])
+        end = datetime(int(ds[:4]), int(ds[4:6]), int(ds[6:8]), end_h, end_m, end_s).timestamp() * 1e6
+        unixtime_list = [t for t in reader.unixtime_list if t > start and t < end]
+    res = reader.read(time_list=unixtime_list, code_list=code_list, factor_list=factor_list, output_type="df")
+    metadata = reader.read_metadata()
+    res.reset_index(inplace=True)
+    res.insert(0, 'time', res.unixtime.apply(lambda x: str(datetime.fromtimestamp(x / 1e6))[-8:].replace(':', '')))
+    res['time'] = res.time.astype('int32')
+    res.insert(0, 'ds', ds)
+    return res
+
+
 class HftPipeline:
 
     def __init__(self, name, include_trans=False, include_order=False, include_snap=False,
+                 include_trans_wiz_order=False,
                  time_flag='1min'):
         self.name = name
         self.include_trans = include_trans
         self.include_order = include_order
         self.include_snap = include_snap
+        self.include_trans_wiz_order = include_trans_wiz_order
         self.time_flag = time_flag
         self._steps = []
         self._factors = []
 
     def run(self, start_ds, end_ds, universe='StockA', n_blocks=1, **kwargs):
-        factor_data = self.compute(start_ds, end_ds, universe, n_blocks)
-        # todo: 将计算完成的数据以h5的形式记录下来
+        import os
+        import cupy as cp
+        import numpy as np
+        import cudf
+        factor_data = self.compute(start_ds, end_ds, universe, n_blocks).reset_index()
+        for ds, data in factor_data.groupby('ds'):
+            date = '-'.join([ds[:4], ds[4:6], ds[6:]])
+            code_list = list(data.code.unique().to_array())
+            factor_list = self._factors
+            factor_path = f'/mnt/lustre/home/zwx/hft_signal_maker/factors/{self.name}'
+            time_series = [("09:30:00", "11:30:00"), ("13:00:00", "15:00:00")]
+            freq = _time_flag(self.time_flag)
+            os.makedirs(factor_path, exist_ok=True)
+            file_name = os.path.join(factor_path, f'{ds}.h5')
+            writer = FactorH5Writer(file_name)
+            writer.init(code_list=code_list,
+                        factor_list=factor_list, time_series=time_series, date=date, freq=freq,
+                        data_type="f")
+            if freq < 60:
+                time = [
+                    int(f"{hour}{minute if minute >= 10 else f'0{minute}'}{second if second >= 10 else f'0{second}'}")
+                    for hour in range(9, 16) for minute in range(60) for second in range(0, 60, freq)]
+            else:
+                time = [int(f"{hour}{minute if minute >= 10 else f'0{minute}'}00") for hour in range(9, 16) for minute
+                        in range(0, 60, int(freq / 60))]
+            time = [t for t in time if (93000 <= t <= 113000) | (130000 <= t <= 150000)]
+            time = cudf.DataFrame({'time_flag': time, 'anchor': 1})
+            codes = cudf.DataFrame({'code': code_list, 'anchor': 1})
+            ct = codes.merge(time, on=['anchor'], how='outer').drop(columns=['anchor']).sort_values(
+                ['code', 'time_flag']).reset_index(drop=True)
+            data = ct.merge(data, on=['code', 'time_flag'], how='left').sort_values(['code', 'time_flag']).reset_index(
+                drop=True)
+            data[data.time_flag == 93000] = data[data.time_flag == 93000].fillna(0)
+            data = data.to_pandas().fillna(method='ffill')
+            data['time_flag'] = data.time_flag.astype('str')
+            data['time_flag'] = data.time_flag.str[:-4] + ':' + data.time_flag.str[-4:-2] + ':' + data.time_flag.str[
+                                                                                                  -2:]
+            data_unstack = cudf.from_pandas(data.set_index(['code', 'time_flag'])).unstack()
+            columns = [c for c in data.columns if c not in ('ds', 'code', 'time_flag')]
+            tensor_result = []
+            for c in columns:
+                tensor_result.append(cp.asarray(data_unstack[c].as_gpu_matrix()))
+            tensor_result = cp.stack(tensor_result)
+            tensor_result = tensor_result.swapaxes(2, 0)
+            writer.h5_file['data'][:, :, :] = np.array(tensor_result.astype('float32').get())
+            writer.close()
 
-    def compute(self, start_ds, end_ds, universe='StockA', n_blocks=1):
+    def compute(self, start_ds, end_ds, universe='StockA', n_blocks=1, window=1):
         """
         计算当前高频因子值
 
+        :param window:
         :param start_ds: 开始时间
         :param end_ds: 结束时间
         :param universe: 股票池
@@ -79,8 +159,12 @@ class HftPipeline:
                     raise NotImplementedError(f'unknown universe {universe}')
             if self.include_snap:
                 logbook.info(f'start load snap of {ds} and cut to {n_blocks} blocks')
-                context._add_snapshot_blocks(_cdf_cut_to_host(get_cudf_snapshot(
-                    ds, code=code_list, source='rough_merge_v2', ns_time=False), n_blocks))
+                snap = []
+                for i in range(window):
+                    temp_ds = str(int(ds) - i)
+                    snap.append(get_cudf_snapshot(
+                        temp_ds, code=code_list, source='huatai', ns_time=False))
+                context._add_snapshot_blocks(_cdf_cut_to_host(cudf.concat(snap), n_blocks))
                 logbook.info(f'finish load snap')
             if self.include_trans:
                 logbook.info(f'start load trans of {ds} and cut to {n_blocks} blocks')
@@ -90,13 +174,40 @@ class HftPipeline:
             if self.include_order:
                 logbook.info(f'start load order of {ds} and cut to {n_blocks} blocks')
                 order_sh = get_cudf_order_sh(ds, code=code_list, source='kuanrui', ).drop(
-                    columns=["orderindex", "channel", "bizindex"], inplace=True)
+                    columns=["orderindex", "channel", "bizindex"])
                 order_sh['exchange'] = 'sh'
-                order_sz = get_cudf_order_sh(ds, code=code_list, source='rough_merge_v0', )
+                order_sz = get_cudf_order_sz(ds, code=code_list, source='huatai', )
                 order_sz['exchange'] = 'sz'
                 order = cudf.concat([order_sh, order_sz])
                 context._add_order_blocks(_cdf_cut_to_host(order, n_blocks))
                 logbook.info(f'finish load order')
+            if self.include_trans_wiz_order:
+                logbook.info(f'start load trans_wiz_order of {ds} and cut to {n_blocks} blocks')
+                order_sz = get_cudf_order_sz('20210607', source='huatai')
+                order_sh = get_cudf_order_sh('20210607', source='kuanrui')
+                bid_sz = order_sz[order_sz.bsflag == 1][['time', 'code', 'orderid', 'price', 'volume']]
+                ask_sz = order_sz[order_sz.bsflag == -1][['time', 'code', 'orderid', 'price', 'volume']]
+                bid_sh = order_sh[order_sh.bsflag == 1][['time', 'code', 'orderid', 'price', 'volume']]
+                ask_sh = order_sh[order_sh.bsflag == -1][['time', 'code', 'orderid', 'price', 'volume']]
+                del order_sz, order_sh
+                bid_columns = ['bid_time', 'code', 'bidID', 'bid_price', 'bid_volume']
+                ask_columns = ['ask_time', 'code', 'askID', 'ask_price', 'ask_volume']
+                bid_sz.columns = bid_columns
+                bid_sh.columns = bid_columns
+                ask_sz.columns = ask_columns
+                ask_sh.columns = ask_columns
+                trans = get_cudf_transaction('20210607', source='rough_merge_v0')
+                bid = cudf.concat([bid_sz, bid_sh])
+                del bid_sz, bid_sh
+                ask = cudf.concat([ask_sz, ask_sh])
+                del ask_sz, ask_sh
+                trans = trans.merge(bid, how='left', on=['code', 'bidID'])
+                del bid
+                trans = trans.merge(ask, how='left', on=['code', 'askID'])
+                del ask
+                trans = trans.set_index(['ds', 'code', 'time']).sort_index()
+                context._add_trans_wiz_order_blocks(_cdf_cut_to_host(trans, n_blocks))
+                logbook.info(f'finish load trans_wiz_order')
             for step in self._steps:
                 func_type, func, kwargs = step
                 if func_type == 'block':
@@ -154,6 +265,32 @@ class HftPipeline:
         :return:
         """
         self._factors = factors
+
+    def get(self, start_ds, end_ds, time_range: list = None, code_list: list = None, factor_list: list = None, n_jobs=None):
+        """
+        读取存储在h5中的因子值
+
+        :param start_ds: 开始日期
+        :param end_ds: 结束日期
+        :param time_range: 时间范围，例如['09:30:00', '10:00:00']
+        :param code_list: 股票列表，例如['000002', '601888']
+        :param factor_list: 因子列表，例如['open', 'close', 'high', 'low']
+        :param n_jobs: 进程数，默认None
+        :return: df
+        """
+        from tqdm import tqdm
+        trading_days = du.get_between_date(start_ds, end_ds)
+        if n_jobs:
+            from joblib import Parallel, delayed
+            df_list = Parallel(n_jobs=n_jobs, backend='multiprocessing')(
+                delayed(_read_one_day)(self.name, ds, time_range, code_list, factor_list)
+                for ds in tqdm(trading_days))
+        else:
+            df_list = []
+            for ds in tqdm(trading_days):
+                df_list.append(_read_one_day(self.name, ds, time_range, code_list, factor_list))
+        df = pd.concat(df_list)
+        return df
 
 
 if __name__ == '__main__':

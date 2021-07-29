@@ -9,6 +9,7 @@ class HftContext:
         self.trans_data = None
         self.order_data = None
         self.snap_data = None
+        self.trans_wiz_order_data = None
         self._frame_data = None
         self._current_interval = (None, None)
         self.all_intervals = set()
@@ -25,7 +26,9 @@ class HftContext:
         :param exclude_cancel: 是否剔除取消单
         :return: cudf.DataFrame
         """
+        import cudf
         assert self.trans_data is not None and self._current_step == 'block'
+        res = cudf.DataFrame.from_arrow(self.trans_data[self._current_interval])
         step = _time_flag(time_flag_freq)
         res = get_cudf_from_arrow(self.trans_data[self._current_interval], step)
         if dimension_fix:
@@ -79,14 +82,27 @@ class HftContext:
             else:
                 time = [int(f"{hour}{minute if minute >= 10 else f'0{minute}'}00") for hour in range(9, 16) for minute
                         in range(0, 60, int(step/60))]
-            time = [t for t in time if 93000 <= t <= 150000]
+            scale = (step//60)*100
+            if self._current_interval[0] and self._current_interval[1]:
+                starttime = self._current_interval[0] + scale
+                endtime = self._current_interval[1] + scale
+            elif self._current_interval[0]:
+                starttime = self._current_interval[0] + scale
+                endtime = 150000
+            elif self._current_interval[1]:
+                starttime = 93000
+                endtime = self._current_interval[1] + scale
+            else:
+                starttime = 93000
+                endtime = 150000
+            time = [t for t in time if starttime <= t <= endtime]
             code = [c for c in res.code.unique().to_array() for i in range(len(time))]
             time = time * len(res.code.unique().to_array())
             temp = cudf.DataFrame(time, code).reset_index()
             temp.columns = ['code', 'time_flag']
             temp = temp.merge(res, on=['code', 'time_flag'], how='left').sort_values(['code', 'time_flag'])
-            temp[(temp.time_flag == 93000) | (temp.time_flag == 150000)] = temp[
-                (temp.time_flag == 93000) | (temp.time_flag == 150000)].fillna(0)
+            temp[(temp.time_flag == starttime) | (temp.time_flag == endtime)] = temp[
+                (temp.time_flag == starttime) | (temp.time_flag == endtime)].fillna(0)
             temp = temp.fillna(method='ffill')
             res = temp
         return res
@@ -150,6 +166,26 @@ class HftContext:
             res = res[res['ordertype'] != 4]
         return res.sort_values(['code', 'time'])
 
+    def get_trans_wiz_order(self, dimension_fix=True, time_flag_freq='1min', only_trade_time=False, exclude_auction=False,
+                  exclude_cancel=True):
+        import cudf
+        assert self.trans_wiz_order_data is not None and self._current_step == 'block'
+        res = cudf.DataFrame.from_arrow(self.trans_wiz_order_data[self._current_interval])
+        step = _time_flag(time_flag_freq)
+        res['time_flag'] = res['time'].map(lambda x: _ts_align(x // 1000, step))
+        if dimension_fix:
+            res['price'] = res['price'] / 10000
+            res['bid_price'] = res['bid_price'] / 10000
+            res['ask_price'] = res['ask_price'] / 10000
+        if only_trade_time:
+            res = res[(res['time'] >= 93000000) & (res['time'] <= 113000000)
+                      | (res['time'] >= 130000000) & (res['time'] <= 150000000)]
+        if exclude_auction:
+            res = res[res['time'] >= 93000000]
+        if exclude_cancel:
+            res = res[res['transType'] != 0]
+        return res.sort_values(['code', 'time'])
+
     def _update_ds(self, ds):
         self.ds = ds
         self._frame_data = None
@@ -173,6 +209,10 @@ class HftContext:
     def _add_order_blocks(self, order_blocks):
         self.order_data = order_blocks
         self.all_intervals |= set(order_blocks.keys())
+
+    def _add_trans_wiz_order_blocks(self, trans_wiz_order_blocks):
+        self.trans_wiz_order_data = trans_wiz_order_blocks
+        self.all_intervals |= set(trans_wiz_order_blocks.keys())
 
     def _update_current_interval(self, interval):
         self._current_interval = interval

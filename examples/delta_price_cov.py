@@ -6,7 +6,7 @@ from hft_signal_maker.hft_pipeline import HftPipeline
 def calculate_delta_p_covariance(cxt, method='snap'):
     cov_dict = {'ds': [], 'code': [], 'minute': [], 'covariance': []}
     if method == 'trans':
-        trans = cxt.get_trans(time_flag_freq='1min', exclude_auction=False, exclude_cancel=True)
+        trans = cxt.get_trans(time_flag_freq='1min', only_trade_time=True)
         stock_group = trans.groupby(['ds', 'code'])
         for stock, one_stock in stock_group:
             one_stock['preprice'] = one_stock.price.shift(1)
@@ -21,7 +21,7 @@ def calculate_delta_p_covariance(cxt, method='snap'):
                 cov_dict['minute'].append(minute)
                 cov_dict['covariance'].append(cov)
     elif method == 'snap':
-        snapshot = cxt.get_snap(time_flag_freq='3s', exclude_auction=True, exclude_post_trading=True)
+        snapshot = cxt.get_snap(time_flag_freq='3s', only_trade_time=True)
         snapshot3s = snapshot.to_pandas()
         snapshot3s['price'] = (snapshot3s.bid1 + snapshot3s.ask1) / 2
         snapshot3s['preprice'] = snapshot3s.groupby(['ds', 'code']).price.shift(1)
@@ -42,5 +42,6 @@ def calculate_delta_p_covariance(cxt, method='snap'):
     return delta_p_cov
 
 
-pipeline = HftPipeline(name='3s_delta_price_cov', include_trans=True, include_snap=True)
-pipeline.add_block_step(calculate_delta_p_covariance)
+if __name__ == '__main__':
+    pipeline = HftPipeline(name='3s_delta_price_cov', include_trans=True, include_snap=True)
+    pipeline.add_block_step(calculate_delta_p_covariance)
