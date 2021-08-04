@@ -1,4 +1,4 @@
-from hft_signal_maker.hft_context import HftContext
+from hft_signal_maker.hft_context import HftContext, _time_flag
 from tools import date_util as du
 import logbook
 import pandas as pd
@@ -136,6 +136,8 @@ class HftPipeline:
         :param n_blocks: 进行block计算时，数据切分的数量，切分数据后在计算时显存占用会显著减少
         :return: 计算出的最终结果，以cudf.DataFrame形式返回
         """
+        import sys
+        sys.path.append('/mnt/lustre/app')
         from dataapi.stock.cudf_market import get_cudf_transaction, get_cudf_snapshot, get_cudf_order_sh, \
             get_cudf_order_sz
         import cudf
@@ -176,15 +178,15 @@ class HftPipeline:
                 order_sh = get_cudf_order_sh(ds, code=code_list, source='kuanrui', ).drop(
                     columns=["orderindex", "channel", "bizindex"])
                 order_sh['exchange'] = 'sh'
-                order_sz = get_cudf_order_sz(ds, code=code_list, source='huatai', )
+                order_sz = get_cudf_order_sz(ds, code=code_list, source='rough_merge_v0', )
                 order_sz['exchange'] = 'sz'
                 order = cudf.concat([order_sh, order_sz])
                 context._add_order_blocks(_cdf_cut_to_host(order, n_blocks))
                 logbook.info(f'finish load order')
             if self.include_trans_wiz_order:
                 logbook.info(f'start load trans_wiz_order of {ds} and cut to {n_blocks} blocks')
-                order_sz = get_cudf_order_sz('20210607', source='huatai')
-                order_sh = get_cudf_order_sh('20210607', source='kuanrui')
+                order_sz = get_cudf_order_sz(ds, source='huatai')
+                order_sh = get_cudf_order_sh(ds, source='kuanrui')
                 bid_sz = order_sz[order_sz.bsflag == 1][['time', 'code', 'orderid', 'price', 'volume']]
                 ask_sz = order_sz[order_sz.bsflag == -1][['time', 'code', 'orderid', 'price', 'volume']]
                 bid_sh = order_sh[order_sh.bsflag == 1][['time', 'code', 'orderid', 'price', 'volume']]

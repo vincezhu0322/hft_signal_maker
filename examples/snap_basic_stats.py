@@ -10,10 +10,11 @@ def calculate_snap_basic_bar(cxt):
 
 pipeline = HftPipeline('1min_snap_basic_stats', include_snap=True)
 pipeline.add_block_step(calculate_snap_basic_bar)
+pipeline.gen_factors(['ask1', 'bid1'])
 
 
 if __name__ == '__main__':
-    # result = pipeline.compute(start_ds='20210608', end_ds='20210608', universe=['000001.SZ', '000637.SZ'])
-    result = pipeline.compute(start_ds='20200102', end_ds='20200102', universe='StockA', n_blocks=8)
+    result = pipeline.compute(start_ds='20210608', end_ds='20210608', universe=['000001.SZ', '000637.SZ'])
+    # result = pipeline.compute(start_ds='20200102', end_ds='20200102', universe='StockA', n_blocks=8)
     print(result)
 
